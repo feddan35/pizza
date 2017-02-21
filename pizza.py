@@ -8,7 +8,7 @@ class Pizza(object):
   def __init__(self, pizza, constraints):
     self.pizza = np.array(pizza)
     self.pslices = np.empty(self.pizza.shape, object)
-    self.pslices_i = []
+    self.pslices_i = {}
     self.mincomp = constraints.mincomp
     self.maxsize = constraints.maxsize
 
@@ -16,10 +16,10 @@ class Pizza(object):
     for (x, y), cell in np.ndenumerate(self.pslices):
         pslice = PSlice(x, y, 1, 1, self)
         self.pslices[x, y] = pslice
-        self.pslices_i.append(pslice)
+        self.pslices_i[pslice.id] = pslice
 
   def score(self):
-    return sum(map(lambda x: x.score(), self.pslices_i))
+    return sum(map(lambda x: x.score(), self.pslices_i.values()))
 
   def __str__(self):
     tos = np.chararray(self.pizza.shape, itemsize=10)
@@ -47,22 +47,40 @@ class PSlice(object):
     return "<PSlice id={} x={} y={} xe={} ye={}>".format(self.id, self.x, self.y, self.xe, self.ye)
 
   def score(self):
+    if self.size() == 0:
+      return 0
     if self.satisfiesConstraints():
       return self.size()
     else:
       return 0
+
+  def subscore(self):
+    if self.size() == 0:
+      return 0
+    else:
+      return 1 - max(self.ntomatoes(), self.nmashrooms())/self.size()
      
   def vals(self):
+    #print "vals for {}".format(self.id)
+    #print self.pizza.pizza[self.x:self.xe, self.y:self.ye].flatten()
     return [i for i in self.pizza.pizza[self.x:self.xe, self.y:self.ye].flatten()]
  
   def satisfiesConstraints(self):
-    return min(self.nmashrooms(), self.ntomatoes()) >= self.pizza.mincomp and self.size() <= self.pizza.maxsize
+    #print "-------"
+    #print self.id
+    #print self.nmashrooms()
+    #print self.ntomatoes()
+    #print self.size()
+    #print self.pizza.mincomp
+    #print min(self.nmashrooms(), self.ntomatoes())
+    #print "-------"
+    return (min(self.nmashrooms(), self.ntomatoes()) >= self.pizza.mincomp) and self.size() <= self.pizza.maxsize
 
   def ntomatoes(self):
-    return len([i for i in self.vals() if i == t])
+    return len([i for i in self.vals() if i == 'T'])
 
   def nmashrooms(self):
-    return len([i for i in self.vals() if i == t])
+    return len([i for i in self.vals() if i == 'M'])
 
   def size(self):
     return (self.xe - self.x) * (self.ye - self.y)
@@ -117,37 +135,48 @@ class ExpansiveCutter(object):
       self.q.put(s)
     while not self.q.empty():
       cs = self.q.get()
-      print self.pizza
+      if cs.id not in self.pizza.pslices_i.keys():
+        continue
       if cs.x != 0:
         res = self.expandUp(cs)
         if res:
+          self.q.put(cs)
           continue
       if cs.y != 0:
         res = self.expandLeft(cs)
         if res:
+          self.q.put(cs)
           continue
       if cs.ye < self.pizza.pizza.shape[1]:
         res = self.expandRight(cs)
         if res:
+          self.q.put(cs)
           continue
       if cs.xe < self.pizza.pizza.shape[0]:
         res = self.expandDown(cs)
         if res:
+          self.q.put(cs)
           continue
 
   def expandUp(self, pslice):
+    if pslice.x == 0:
+      return False
     ngbs = pslice.ngbs_up()
     ngbsscores = sum(map(lambda x: x.score(), ngbs))
     pslicescore = pslice.score()
     fngbsscores = sum(map(lambda x: self.futureScore(x.x, x.y, x.xe-1, x.ye), ngbs))
     fpslicescore = self.futureScore(pslice.x-1, pslice.y, pslice.xe, pslice.ye)
-    if fpslicescore - pslicescore > fngbsscores - ngbsscores:
+    ngbssubs = sum(map(lambda x: x.subscore(), ngbs))
+    fngbssubs = sum(map(lambda x: self.futureSubscore(x.x, x.y, x.xe-1, x.ye), ngbs))
+    pslicesub = pslice.subscore()
+    fpslicesub = self.futureSubscore(pslice.x-1, pslice.y, pslice.xe, pslice.ye)
+    if (fpslicescore - pslicescore > ngbsscores - fngbsscores) or ((ngbssubs + pslicesub < fngbssubs + fpslicesub) and (pslice.ye - pslice.y)*(pslice.xe - (pslice.x-1)) < self.pizza.maxsize):
       pslice.x = pslice.x - 1
       self.pizza.pslices[pslice.x:pslice.x+1,pslice.y:pslice.ye].fill(pslice)
       for n in ngbs:
         n.xe = n.xe - 1
         if n.xe == n.x:
-          self.pizza.pslices_i.remove(n)
+          del self.pizza.pslices_i[n.id]
         else:
           self.q.put(n)
       return True
@@ -155,18 +184,24 @@ class ExpansiveCutter(object):
       return False
 
   def expandDown(self, pslice):
-    ngbs = pslice.ngbs_up()
+    if pslice.xe >= self.pizza.pizza.shape[0]:
+      return False
+    ngbs = pslice.ngbs_down()
     ngbsscores = sum(map(lambda x: x.score(), ngbs))
     pslicescore = pslice.score()
     fngbsscores = sum(map(lambda x: self.futureScore(x.x + 1, x.y, x.xe, x.ye), ngbs))
     fpslicescore = self.futureScore(pslice.x, pslice.y, pslice.xe + 1, pslice.ye)
-    if fpslicescore - pslicescore > fngbsscores - ngbsscores:
+    ngbssubs = sum(map(lambda x: x.subscore(), ngbs))
+    fngbssubs = sum(map(lambda x: self.futureSubscore(x.x + 1, x.y, x.xe, x.ye), ngbs))
+    pslicesub = pslice.subscore()
+    fpslicesub = self.futureSubscore(pslice.x, pslice.y, pslice.xe + 1, pslice.ye)
+    if (fpslicescore - pslicescore > ngbsscores - fngbsscores) or ((ngbssubs + pslicesub < fngbssubs + fpslicesub) and (pslice.ye - pslice.y)*(pslice.xe + 1 - pslice.x) < self.pizza.maxsize):
       pslice.xe = pslice.xe + 1
-      self.pizza.pslices[pslice.xe:pslice.xe+1,pslice.y:pslice.ye].fill(pslice)
+      self.pizza.pslices[pslice.xe-1:pslice.xe,pslice.y:pslice.ye].fill(pslice)
       for n in ngbs:
         n.x = n.x + 1
         if n.xe == n.x:
-          self.pizza.pslices_i.remove(n)
+          del self.pizza.pslices_i[n.id]
         else:
           self.q.put(n)
       return True
@@ -175,18 +210,24 @@ class ExpansiveCutter(object):
 
 
   def expandLeft(self, pslice):
-    ngbs = pslice.ngbs_up()
+    if pslice.y == 0:
+      return False
+    ngbs = pslice.ngbs_left()
     ngbsscores = sum(map(lambda x: x.score(), ngbs))
     pslicescore = pslice.score()
     fngbsscores = sum(map(lambda x: self.futureScore(x.x, x.y, x.xe, x.ye-1), ngbs))
     fpslicescore = self.futureScore(pslice.x, pslice.y-1, pslice.xe, pslice.ye)
-    if fpslicescore - pslicescore > fngbsscores - ngbsscores:
+    ngbssubs = sum(map(lambda x: x.subscore(), ngbs))
+    fngbssubs = sum(map(lambda x: self.futureSubscore(x.x, x.y, x.xe, x.ye-1), ngbs))
+    pslicesub = pslice.subscore()
+    fpslicesub = self.futureSubscore(pslice.x, pslice.y-1, pslice.xe, pslice.ye)
+    if (fpslicescore - pslicescore) > (ngbsscores - fngbsscores) or ((ngbssubs + pslicesub < fngbssubs + fpslicesub) and (pslice.ye - (pslice.y-1))*(pslice.xe - pslice.x) < self.pizza.maxsize):
       pslice.y = pslice.y - 1
       self.pizza.pslices[pslice.x:pslice.xe,pslice.y:pslice.y+1].fill(pslice)
       for n in ngbs:
         n.ye = n.ye - 1
         if n.ye == n.y:
-          self.pizza.pslices_i.remove(n)
+          del self.pizza.pslices_i[n.id]
         else:
           self.q.put(n)
       return True
@@ -195,20 +236,24 @@ class ExpansiveCutter(object):
 
 
   def expandRight(self, pslice):
-    print "expanding {} right".format(pslice.id)
-    ngbs = pslice.ngbs_up()
+    if pslice.ye >= self.pizza.pizza.shape[1]:
+      return False
+    ngbs = pslice.ngbs_right()
     ngbsscores = sum(map(lambda x: x.score(), ngbs))
     pslicescore = pslice.score()
     fngbsscores = sum(map(lambda x: self.futureScore(x.x, x.y+1, x.xe, x.ye), ngbs))
     fpslicescore = self.futureScore(pslice.x, pslice.y, pslice.xe, pslice.ye+1)
-    print "{} > {} ? {}".format(fpslicescore - pslicescore, fngbsscores - ngbsscores, fpslicescore - pslicescore > fngbsscores - ngbsscores)
-    if fpslicescore - pslicescore > fngbsscores - ngbsscores:
+    ngbssubs = sum(map(lambda x: x.subscore(), ngbs))
+    fngbssubs = sum(map(lambda x: self.futureSubscore(x.x, x.y+1, x.xe, x.ye), ngbs))
+    pslicesub = pslice.subscore()
+    fpslicesub = self.futureSubscore(pslice.x, pslice.y, pslice.xe, pslice.ye+1)
+    if ((fpslicescore - pslicescore) > (ngbsscores - fngbsscores)) or ((ngbssubs + pslicesub < fngbssubs + fpslicesub) and (pslice.ye+1 - pslice.y)*(pslice.xe - pslice.x) < self.pizza.maxsize):
       pslice.ye = pslice.ye + 1
-      self.pizza.pslices[pslice.x:pslice.xe,pslice.ye:pslice.ye+1].fill(pslice)
+      self.pizza.pslices[pslice.x:pslice.xe,pslice.ye-1:pslice.ye].fill(pslice)
       for n in ngbs:
         n.y = n.y + 1
         if n.ye == n.y:
-          self.pizza.pslices_i.remove(n)
+					del self.pizza.pslices_i[n.id]
         else:
           self.q.put(n)
       return True
@@ -216,16 +261,22 @@ class ExpansiveCutter(object):
       return False
 
   def futureScore(self, x, y, xe, ye):
-    p = PSlice(x, y, xe, ye, self.pizza)
-    print p
+    p = PSlice(x, y, xe - x, ye - y, self.pizza)
     return p.score()
+  
+  def futureSubscore(self, x, y, xe, ye):
+    p = PSlice(x, y, xe - x, ye - y, self.pizza)
+    return p.subscore()
     
 
 if __name__ == "__main__":
   t = 'T'
   m = 'M'
   cs = Constraints(2, 4)
-  p = Pizza([[t,t,t,t],[m,m,m,m],[t,m,t,m]], cs)
+  p = Pizza([[t,t,t,t,m, t, t, m, m],[m,m,m,m, m, t, t, t, m],[t,m,t,m, t, m, m, t, t]], cs)
   cutter = ExpansiveCutter(p)
   p.populatePizza()
+  cutter.cut()
+  print p
+  print p.score()
   import code; code.interact(local=locals())
