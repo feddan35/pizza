@@ -1,3 +1,1 @@
 # pizza
-
-Max Wasylow
