@@ -156,7 +156,7 @@ class ExpansiveCutter(object):
       self.q.put(self.pizza.pslices_i[s])
     while not self.q.empty():
       cs = self.q.get()
-      self.pizza.log()
+      #self.pizza.log()
       print "current cs {}".format(cs.id)
       if cs.id not in self.pizza.pslices_i.keys():
         continue
@@ -301,13 +301,20 @@ class ExpansiveCutter(object):
     
 
 if __name__ == "__main__":
-  t = 'T'
-  m = 'M'
-  cs = Constraints(3, 9)
-  p = Pizza([[t,t,t,t,m, t, t, m, m],[m,m,m,m, m, t, t, t, m],[t,m,t,m, t, m, m, t, t]], cs)
-  cutter = ExpansiveCutter(p)
+  import parser, sys, serializer
+  x, y, minc, maxc, pizza = parser.parse(sys.argv[1])
+  
+  cs = Constraints(minc, maxc)
+
+  p = Pizza(pizza, cs)
   p.populatePizza()
+
+  cutter = ExpansiveCutter(p)
   cutter.cut()
+
   print p
   print p.score()
+
+  serializer.serialize(p, sys.argv[1].split('.')[0] + ".out")
+
   import code; code.interact(local=locals())
