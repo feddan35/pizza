@@ -272,7 +272,7 @@ class ExpansiveCutter(object):
 if __name__ == "__main__":
   t = 'T'
   m = 'M'
-  cs = Constraints(2, 4)
+  cs = Constraints(2, 10)
   p = Pizza([[t,t,t,t,m, t, t, m, m],[m,m,m,m, m, t, t, t, m],[t,m,t,m, t, m, m, t, t]], cs)
   cutter = ExpansiveCutter(p)
   p.populatePizza()
